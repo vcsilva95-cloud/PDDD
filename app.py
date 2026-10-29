@@ -77,14 +77,79 @@ def nome_usina(texto):
 
 def formatar_grafico(fig, titulo, eixo_y, eixo_x="Estágio mensal"):
     fig.update_layout(
-        title=dict(text=titulo, x=0.01, font=dict(size=20, color="#0f2747")),
-        paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
-        font=dict(color="#334155", size=13), height=520,
-        margin=dict(l=20, r=20, t=65, b=25), hovermode="x unified",
-        legend=dict(title="Componente", x=1.01, y=1),
-        xaxis=dict(title=eixo_x, gridcolor="#e2e8f0", linecolor="#94a3b8", dtick=1),
-        yaxis=dict(title=eixo_y, gridcolor="#e2e8f0", zerolinecolor="#94a3b8"),
+        title=dict(
+            text=titulo,
+            x=0.01,
+            xanchor="left",
+            font=dict(
+                size=20,
+                color="#0f2747"
+            ),
+        ),
+
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+
+        font=dict(
+            color="#334155",
+            size=13
+        ),
+
+        height=520,
+
+        # Mais espaço à esquerda, à direita e abaixo
+        margin=dict(
+            l=100,
+            r=180,
+            t=80,
+            b=90
+        ),
+
+        # Evita a caixa vertical grande do "x unified"
+        hovermode="closest",
+
+        legend=dict(
+            title=dict(text="Componente"),
+            orientation="v",
+            x=1.02,
+            xanchor="left",
+            y=1,
+            yanchor="top",
+            bgcolor="rgba(255,255,255,0.90)",
+            bordercolor="#d7e0eb",
+            borderwidth=1,
+            font=dict(
+                color="#334155",
+                size=12
+            ),
+        ),
+
+        xaxis=dict(
+            title=dict(
+                text=eixo_x,
+                standoff=20
+            ),
+            gridcolor="#e2e8f0",
+            linecolor="#94a3b8",
+            tickmode="linear",
+            dtick=1,
+            automargin=True
+        ),
+
+        yaxis=dict(
+            title=dict(
+                text=eixo_y,
+                standoff=25
+            ),
+            gridcolor="#e2e8f0",
+            zerolinecolor="#94a3b8",
+            automargin=True,
+
+            # Formatação monetária mais legível para valores grandes
+            tickformat=",.2s"
+        ),
     )
+
     return fig
 
 
