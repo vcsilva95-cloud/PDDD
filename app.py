@@ -1,95 +1,187 @@
-# -*- coding: utf-8 -*-
-import copy
-import streamlit as st
-import plotly.graph_objects as go
-from modelo import sistema, pddd
+"""Dashboard Streamlit para visualização dos resultados da PDDD."""
 
-st.set_page_config(page_title="PDDD | Despacho Hidrotérmico", page_icon="⚡", layout="wide")
-st.title("Despacho Hidrotérmico")
-st.caption("Planejamento Energético • Programação Dinâmica Dual Determinística (PDDD)")
+import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+
+from modelo import pddd, sistema
+
+
+st.set_page_config(
+    page_title="Dashboard PDDD",
+    page_icon="⚡",
+    layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+        .stApp { background-color: #FFFFFF; color: #1F2937; }
+        [data-testid="stHeader"] { background-color: rgba(255,255,255,0.95); }
+        [data-testid="stSidebar"] { background-color: #F8FAFC; }
+        div[data-testid="stMetric"] {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 12px;
+            padding: 14px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+@st.cache_data(show_spinner=False)
+def executar_modelo(cenario, tolerancia, max_iteracoes):
+    return pddd(
+        sistema=sistema,
+        cenario=cenario,
+        imprime=False,
+        tolerancia=tolerancia,
+        max_iteracoes=max_iteracoes,
+    )
+
+
+def grafico_atendimento(resultado):
+    estagios = list(range(1, sistema["DGer"]["Nr_Est"] + 1))
+    fig = go.Figure()
+    cores_uhe = ["#2563EB", "#06B6D4"]
+    cores_ute = ["#F59E0B", "#7C3AED"]
+
+    for i, usina in enumerate(sistema["UHE"]):
+        vt = np.asarray(resultado["UHE"][i]["vt"], dtype=float)
+        geracao = usina["Prod"] * vt
+        fig.add_bar(
+            x=estagios,
+            y=geracao,
+            name=usina["Nome"],
+            marker_color=cores_uhe[i % len(cores_uhe)],
+            hovertemplate="Estágio %{x}<br>%{y:.2f} MWmed<extra>%{fullData.name}</extra>",
+        )
+
+    for i, usina in enumerate(sistema["UTE"]):
+        fig.add_bar(
+            x=estagios,
+            y=resultado["UTE"][i]["gt"],
+            name=usina["Nome"],
+            marker_color=cores_ute[i % len(cores_ute)],
+            hovertemplate="Estágio %{x}<br>%{y:.2f} MWmed<extra>%{fullData.name}</extra>",
+        )
+
+    fig.add_bar(
+        x=estagios,
+        y=resultado["DGer"]["Deficit"],
+        name="Déficit",
+        marker_color="#DC2626",
+        hovertemplate="Estágio %{x}<br>%{y:.2f} MWmed<extra>Déficit</extra>",
+    )
+    fig.add_scatter(
+        x=estagios,
+        y=sistema["DGer"]["Carga"],
+        name="Demanda",
+        mode="lines+markers",
+        line=dict(color="#111827", width=3, dash="dash"),
+        hovertemplate="Estágio %{x}<br>%{y:.2f} MWmed<extra>Demanda</extra>",
+    )
+    fig.update_layout(
+        title="Atendimento à demanda",
+        barmode="stack",
+        template="plotly_white",
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        xaxis_title="Estágio mensal",
+        yaxis_title="Potência média (MWmed)",
+        hovermode="x unified",
+        legend_title="Componente",
+        margin=dict(l=30, r=20, t=65, b=30),
+    )
+    fig.update_xaxes(dtick=1, gridcolor="#E5E7EB")
+    fig.update_yaxes(rangemode="tozero", gridcolor="#E5E7EB")
+    return fig
+
+
+def grafico_convergencia(resultado):
+    zinf = np.asarray(resultado["DGer"]["ZINF"], dtype=float)
+    zsup = np.asarray(resultado["DGer"]["ZSUP"], dtype=float)
+    mascara = np.isfinite(zinf) & np.isfinite(zsup)
+    zinf, zsup = zinf[mascara], zsup[mascara]
+    iteracoes = np.arange(1, len(zinf) + 1)
+
+    fig = go.Figure()
+    fig.add_scatter(
+        x=iteracoes, y=zinf, name="ZINF", mode="lines+markers",
+        line=dict(color="#2563EB", width=3),
+        hovertemplate="Iteração %{x}<br>R$ %{y:,.2f}<extra>ZINF</extra>",
+    )
+    fig.add_scatter(
+        x=iteracoes, y=zsup, name="ZSUP", mode="lines+markers",
+        line=dict(color="#DC2626", width=3),
+        hovertemplate="Iteração %{x}<br>R$ %{y:,.2f}<extra>ZSUP</extra>",
+    )
+    fig.update_layout(
+        title="Convergência da PDDD",
+        template="plotly_white",
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        xaxis_title="Iteração",
+        yaxis_title="Custo (R$)",
+        hovermode="x unified",
+        legend_title="Limite",
+        margin=dict(l=30, r=20, t=65, b=30),
+    )
+    fig.update_xaxes(dtick=1, gridcolor="#E5E7EB")
+    fig.update_yaxes(gridcolor="#E5E7EB", tickformat=",.2f")
+    return fig
+
+
+st.title("⚡ Programação Dinâmica Dual Determinística")
+st.caption("Despacho hidrotérmico, atendimento à demanda e convergência de ZINF e ZSUP.")
 
 with st.sidebar:
-    st.header("Parâmetros da simulação")
-    cenario_nome = st.radio("Cenário hidrológico", ["Otimista", "Pessimista"])
-    cenario = 0 if cenario_nome == "Otimista" else 1
-    fator_carga = st.slider("Carga do sistema (%)", 50, 150, 100, 5)
-    st.subheader("Condições iniciais")
-    volumes = []
-    for u in sistema["UHE"]:
-        volumes.append(st.number_input(f"Volume inicial • {u['Nome'].title()} (hm³)",
-                                      min_value=float(u["Vmin"]), max_value=float(u["Vmax"]),
-                                      value=float(u["VI"]), step=1.0))
+    st.header("Configurações")
+    cenario = st.selectbox(
+        "Cenário de afluência",
+        options=[0, 1],
+        format_func=lambda x: "Cenário 1" if x == 0 else "Cenário 2",
+    )
+    tolerancia = st.number_input(
+        "Tolerância absoluta (R$)", min_value=0.01, value=0.01, step=0.01,
+        format="%.2f",
+    )
+    max_iteracoes = st.number_input(
+        "Máximo de iterações", min_value=1, max_value=500, value=100, step=1,
+    )
     executar = st.button("Executar PDDD", type="primary", use_container_width=True)
-    st.divider()
-    st.header("Dados do sistema")
-    st.metric("Custo do déficit", f"R$ {sistema['DGer']['CDef']:,.0f}/MWmed".replace(",", "."))
-    for u in sistema["UHE"]:
-        st.write(f"**{u['Nome'].title()}** · ρ = {u['Prod']:.3f} MWmed/hm³")
-    for u in sistema["UTE"]:
-        st.write(f"**{u['Nome']}** · {u['Capac']:.0f} MW · CVU R$ {u['Custo']:,.0f}/MWmed".replace(",", "."))
 
-sis = copy.deepcopy(sistema)
-sis["DGer"]["Carga"] = [x * fator_carga / 100 for x in sistema["DGer"]["Carga"]]
-for i, volume in enumerate(volumes):
-    sis["UHE"][i]["VI"] = volume
-
-if executar or "resultado" not in st.session_state:
+if executar or "resultado_pddd" not in st.session_state:
     try:
-        with st.spinner("Executando os passos forward e backward..."):
-            st.session_state.resultado = pddd(sis, cenario=cenario)
-            st.session_state.parametros = (cenario_nome, fator_carga, tuple(volumes))
+        with st.spinner("Resolvendo a PDDD..."):
+            st.session_state.resultado_pddd = executar_modelo(
+                cenario, float(tolerancia), int(max_iteracoes)
+            )
     except Exception as erro:
         st.error(f"Não foi possível executar o modelo: {erro}")
         st.stop()
 
-r = st.session_state.resultado
-meses = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
-cores_h = ["#1565C0", "#42A5F5"]
-cores_t = ["#FF9800", "#E53935"]
+resultado = st.session_state.resultado_pddd
+zinf_final = float(resultado["DGer"]["ZINF"][-1])
+zsup_final = float(resultado["DGer"]["ZSUP"][-1])
+gap_final = abs(zsup_final - zinf_final)
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Custo total", f"R$ {r['DGer']['CustoTotal']:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-c2.metric("Iterações", r["DGer"]["Nr_Iteracoes"])
-c3.metric("CMO máximo", f"R$ {max(r['DGer']['CMO']):,.2f}/MWmed")
-c4.metric("Déficit máximo", f"{max(r['DGer']['Deficit']):.2f} MWmed")
+c1.metric("Custo da política", f"R$ {resultado['DGer']['CustoTotal']:,.2f}")
+c2.metric("Iterações", resultado["DGer"]["Nr_Iteracoes"])
+c3.metric("ZINF final", f"R$ {zinf_final:,.2f}")
+c4.metric("Gap final", f"R$ {gap_final:,.2f}")
 
-def layout(fig, titulo, y):
-    fig.update_layout(title=titulo, yaxis_title=y, xaxis_title="Mês", hovermode="x unified",
-                      legend_title="Série", margin=dict(l=20, r=20, t=60, b=20))
-    return fig
+if resultado["DGer"]["Convergiu"]:
+    st.success("O critério de convergência foi atendido.")
+else:
+    st.warning("O limite máximo de iterações foi atingido antes da tolerância.")
 
-aba1, aba2, aba3, aba4 = st.tabs(["Despacho", "Reservatórios", "Custos marginais", "Convergência"])
-with aba1:
-    fig = go.Figure()
-    for i, u in enumerate(sis["UHE"]):
-        gh = [u["Prod"] * x for x in r["UHE"][i]["vt"]]
-        fig.add_bar(x=meses, y=gh, name=u["Nome"].title(), marker_color=cores_h[i])
-    for i, u in enumerate(sis["UTE"]):
-        fig.add_bar(x=meses, y=r["UTE"][i]["gt"], name=u["Nome"], marker_color=cores_t[i])
-    fig.add_bar(x=meses, y=r["DGer"]["Deficit"], name="Déficit", marker_color="#9E9E9E")
-    fig.add_scatter(x=meses, y=sis["DGer"]["Carga"], name="Carga", mode="lines+markers",
-                    line=dict(color="black", width=3, dash="dash"))
-    fig.update_layout(barmode="stack")
-    st.plotly_chart(layout(fig, "Despacho de geração por estágio", "Geração (MWmed)"), use_container_width=True)
-with aba2:
-    fig = go.Figure()
-    for i, u in enumerate(sis["UHE"]):
-        fig.add_scatter(x=meses, y=r["UHE"][i]["vf"], name=u["Nome"].title(), mode="lines+markers",
-                        line=dict(color=cores_h[i], width=3))
-    st.plotly_chart(layout(fig, "Evolução do armazenamento", "Volume final (hm³)"), use_container_width=True)
-with aba3:
-    fig = go.Figure()
-    fig.add_scatter(x=meses, y=r["DGer"]["CMO"], name="CMO", mode="lines+markers", line=dict(color="#6A1B9A", width=3))
-    st.plotly_chart(layout(fig, "Custo Marginal de Operação", "CMO (R$/MWmed)"), use_container_width=True)
-    fig2 = go.Figure()
-    for i, u in enumerate(sis["UHE"]):
-        fig2.add_scatter(x=meses, y=r["UHE"][i]["cma"], name=u["Nome"].title(), mode="lines+markers")
-    st.plotly_chart(layout(fig2, "Valor da água", "Valor da água (R$/hm³)"), use_container_width=True)
-with aba4:
-    it = list(range(1, r["DGer"]["Nr_Iteracoes"] + 1))
-    fig = go.Figure()
-    fig.add_scatter(x=it, y=r["DGer"]["ZINF"], name="ZINF", mode="lines+markers")
-    fig.add_scatter(x=it, y=r["DGer"]["ZSUP"], name="ZSUP", mode="lines+markers")
-    st.plotly_chart(layout(fig, "Convergência da PDDD", "Custo (R$)"), use_container_width=True)
+st.plotly_chart(grafico_atendimento(resultado), use_container_width=True)
+st.plotly_chart(grafico_convergencia(resultado), use_container_width=True)
 
-st.info(f"Resultado exibido: cenário {st.session_state.parametros[0]}, carga a {st.session_state.parametros[1]}%.")
+with st.expander("Resultados numéricos"):
+    st.json(resultado)
+
