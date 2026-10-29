@@ -306,6 +306,17 @@ with t4:
     fig.add_scatter(x=iteracoes, y=zsup[:n], name="ZSUP", mode="lines+markers", line=dict(color="#dc2626", width=3))
     st.plotly_chart(formatar_grafico(fig, "Convergência da PDDD", "Custo (R$)", "Iteração"), use_container_width=True, theme=None)
 
+fig.update_layout(
+    legend=dict(
+        orientation="h",
+        x=0.5,
+        xanchor="center",
+        y=1.12,
+        yanchor="bottom",
+        title=None
+    )
+)
+
 with st.expander("Resultados numéricos"):
     st.json(r, expanded=False)
 
