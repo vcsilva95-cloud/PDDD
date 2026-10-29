@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import copy
+import inspect
 import streamlit as st
 import plotly.graph_objects as go
 from modelo import sistema, pddd
@@ -58,8 +59,21 @@ st.divider(); sis=copy.deepcopy(sistema)
 if rodar or "resultado" not in st.session_state:
     try:
         with st.spinner("Executando as passadas forward e backward..."):
-            st.session_state.resultado=pddd(sis,cenario=cen,imprime=False,tolerancia=float(tol),max_iter=int(maxit))
-            st.session_state.parametros=(cen_nome,float(tol),int(maxit))
+            # Compatibilidade com as duas assinaturas existentes de pddd:
+            # PDF original: pddd(sistema, cenario, imprime)
+            # modelo modular: pddd(sistema, cenario, imprime, tolerancia, max_iter)
+            parametros_pddd = inspect.signature(pddd).parameters
+            kwargs_pddd = {"cenario": cen, "imprime": False}
+            if "tolerancia" in parametros_pddd:
+                kwargs_pddd["tolerancia"] = float(tol)
+            if "max_iter" in parametros_pddd:
+                kwargs_pddd["max_iter"] = int(maxit)
+            elif "max_iteracoes" in parametros_pddd:
+                kwargs_pddd["max_iteracoes"] = int(maxit)
+
+            st.session_state.resultado = pddd(sis, **kwargs_pddd)
+            st.session_state.parametros = (cen_nome, float(tol), int(maxit))
+            st.session_state.parametros_aceitos = set(parametros_pddd)
     except Exception as e:
         st.error(f"Não foi possível executar o modelo: {e}"); st.stop()
 r=st.session_state.resultado; p=st.session_state.parametros; est=list(range(1,sis["DGer"]["Nr_Est"]+1))
