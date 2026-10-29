@@ -1,8 +1,7 @@
-# -*- coding: utf-8 -*-
-"""PDDD determinÃ­stica baseada no cÃ³digo do PDF Codigo_5 - otimista.
+"""Modelo de Programação Dinâmica Dual Determinística (PDDD).
 
-Este mÃ³dulo foi organizado para ser importado pelo app.py do dashboard.
-A execuÃ§Ã£o do modelo sÃ³ ocorre quando a funÃ§Ã£o pddd(...) Ã© chamada.
+Baseado no exercício fornecido pela usuária, com correções no balanço hídrico,
+no índice da carga, na consolidação do déficit e na passagem backward.
 """
 
 import time
@@ -11,122 +10,125 @@ from cvxopt.modeling import variable, op
 
 
 # -----------------------------------------------------------------------------
-# DADOS DO SISTEMA
+# Dados do sistema
 # -----------------------------------------------------------------------------
-sistema = {
-    "UHE": [
-        {
-            "Nome": "UHE CHAVANTES",
-            "Vmax": 8795.0,
-            "Vmin": 5754.0,
-            "VI": 8000.0,
-            "Prod": 0.235,
-            "Engol": 1628.0,
-            "Afl": [
-                [2156.11, 508.90], [1838.59, 713.66], [1674.00, 656.21],
-                [1153.44, 466.56], [1218.67, 361.58], [1464.48, 155.52],
-                [1098.14, 334.80], [883.87, 308.02], [1114.56, 220.32],
-                [1280.28, 334.80], [1101.60, 375.84], [1406.16, 468.72],
-            ],
-        },
-        {
-            "Nome": "UHE PIRAJU",
-            "Vmax": 85.0,
-            "Vmin": 83.0,
-            "VI": 84.0,
-            "Prod": 0.089,
-            "Engol": 899.16,
-            "Afl": [
-                [1379.38, 374.98], [1270.08, 483.84], [1178.50, 455.33],
-                [790.56, 336.96], [749.95, 267.84], [972.00, 90.72],
-                [696.38, 227.66], [575.86, 214.27], [686.88, 168.48],
-                [790.13, 241.06], [699.84, 266.98], [937.44, 308.02],
-            ],
-        },
-    ],
-    "UTE": [
-        {"Nome": "UTE_Termobahia", "Capac": 186.0, "Custo": 424080.0},
-        {"Nome": "UTE_PecÃ©m_II", "Capac": 144.0, "Custo": 1764000.0},
-    ],
-    "DGer": {
-        "CDef": 5969520.0,
-        "Carga": [530.0, 508.0, 516.0, 437.0, 420.0, 401.0,
-                  390.0, 411.0, 454.0, 490.0, 506.0, 504.0],
-        "Nr_Disc": 3,
-        "Nr_Est": 12,
-        "Nr_Cen": 2,
+lista_uhe = [
+    {
+        "Nome": "UHE CHAVANTES",
+        "Vmax": 8795.0,
+        "Vmin": 5754.0,
+        "VI": 8000.0,
+        "Prod": 0.235,
+        "Engol": 1628.0,
+        "Afl": [
+            [2156.11, 508.90], [1838.59, 713.66], [1674.00, 656.21],
+            [1153.44, 466.56], [1218.67, 361.58], [1464.48, 155.52],
+            [1098.14, 334.80], [883.87, 308.02], [1114.56, 220.32],
+            [1280.28, 334.80], [1101.60, 375.84], [1406.16, 468.72],
+        ],
     },
+    {
+        "Nome": "UHE PIRAJU",
+        "Vmax": 85.0,
+        "Vmin": 83.0,
+        "VI": 84.0,
+        "Prod": 0.089,
+        "Engol": 899.16,
+        "Afl": [
+            [1379.38, 374.98], [1270.08, 483.84], [1178.50, 455.33],
+            [790.56, 336.96], [749.95, 267.84], [972.00, 90.72],
+            [696.38, 227.66], [575.86, 214.27], [686.88, 168.48],
+            [790.13, 241.06], [699.84, 266.98], [937.44, 308.02],
+        ],
+    },
+]
+
+lista_ute = [
+    {"Nome": "UTE Termobahia", "Capac": 186.0, "Custo": 424080.0},
+    {"Nome": "UTE Pecém II", "Capac": 144.0, "Custo": 1764000.0},
+]
+
+d_gerais = {
+    "CDef": 5969520.0,
+    "Carga": [530.0, 508.0, 516.0, 437.0, 420.0, 401.0,
+              390.0, 411.0, 454.0, 490.0, 506.0, 504.0],
+    "Nr_Disc": 3,
+    "Nr_Est": 12,
+    "Nr_Cen": 2,
 }
 
-
-def _escalar(expressao):
-    """Converte o valor escalar retornado pelo CVXOPT para float."""
-    return float(expressao.value()[0])
+sistema = {"DGer": d_gerais, "UHE": lista_uhe, "UTE": lista_ute}
 
 
-def despacho_pddd(sistema, VI, AFL, pote_de_corte, iest, imprime=False):
-    """Resolve o problema linear de um estÃ¡gio.
+def _valor(escalar):
+    """Converte o escalar do CVXOPT em float."""
+    return float(escalar.value()[0])
+
+
+def despacho_pddd(sistema, vi, afl, pote_de_corte, iest, imprime=False):
+    """Resolve o despacho hidrotérmico de um estágio.
 
     Parameters
     ----------
     iest : int
-        NÃºmero acadÃªmico do estÃ¡gio: 1, 2, ..., Nr_Est.
+        Estágio no padrão 1..Nr_Est.
     """
     num_uhe = len(sistema["UHE"])
     num_ute = len(sistema["UTE"])
 
-    vf = variable(num_uhe, "Volume Final na Usina")
-    vt = variable(num_uhe, "Volume Turbinado na Usina")
-    vv = variable(num_uhe, "Volume Vertido na Usina")
-    gt = variable(num_ute, "GeraÃ§Ã£o na Usina TÃ©rmica")
-    deficit = variable(1, "DÃ©ficit de Energia no Sistema")
-    alpha = variable(1, "Custo Futuro")
+    vf = variable(num_uhe, "Volume final")
+    vt = variable(num_uhe, "Volume turbinado")
+    vv = variable(num_uhe, "Volume vertido")
+    gt = variable(num_ute, "Geração térmica")
+    deficit = variable(1, "Déficit")
+    alpha = variable(1, "Custo futuro")
 
-    # FunÃ§Ã£o objetivo: custo imediato + aproximaÃ§Ã£o do custo futuro.
-    fob = sum(ute["Custo"] * gt[i] for i, ute in enumerate(sistema["UTE"]))
+    fob = 0
+    for i, usina in enumerate(sistema["UTE"]):
+        fob += usina["Custo"] * gt[i]
     fob += sistema["DGer"]["CDef"] * deficit[0]
-    fob += sum(0.01 * vv[i] for i in range(num_uhe))
+    for i in range(num_uhe):
+        fob += 0.01 * vv[i]
     fob += alpha[0]
 
     restricoes = []
 
-    # As primeiras num_uhe restriÃ§Ãµes sÃ£o os balanÃ§os hÃ­dricos.
+    # Balanço hídrico individualizado por UHE.
     for i in range(num_uhe):
         restricoes.append(
-            vf[i] == float(VI[i]) + float(AFL[i]) - vt[i] - vv[i]
+            vf[i] == float(vi[i]) + float(afl[i]) - vt[i] - vv[i]
         )
 
-    # A restriÃ§Ã£o seguinte Ã© o atendimento Ã  demanda.
-    atendimento = sum(
-        uhe["Prod"] * vt[i] for i, uhe in enumerate(sistema["UHE"])
-    )
-    atendimento += sum(gt[i] for i in range(num_ute))
+    # Atendimento à demanda. iest é 1-based; a lista Carga é 0-based.
+    atendimento = 0
+    for i, usina in enumerate(sistema["UHE"]):
+        atendimento += usina["Prod"] * vt[i]
+    for i in range(num_ute):
+        atendimento += gt[i]
     atendimento += deficit[0]
-    indice_demanda = len(restricoes)
+    restricao_demanda = len(restricoes)
     restricoes.append(atendimento == sistema["DGer"]["Carga"][iest - 1])
 
-    # CanalizaÃ§Ãµes.
-    for i, uhe in enumerate(sistema["UHE"]):
-        restricoes += [
-            vf[i] >= uhe["Vmin"],
-            vf[i] <= uhe["Vmax"],
+    for i, usina in enumerate(sistema["UHE"]):
+        restricoes.extend([
+            vf[i] >= usina["Vmin"],
+            vf[i] <= usina["Vmax"],
             vt[i] >= 0,
-            vt[i] <= uhe["Engol"],
+            vt[i] <= usina["Engol"],
             vv[i] >= 0,
-        ]
+        ])
 
-    for i, ute in enumerate(sistema["UTE"]):
-        restricoes += [gt[i] >= 0, gt[i] <= ute["Capac"]]
+    for i, usina in enumerate(sistema["UTE"]):
+        restricoes.extend([gt[i] >= 0, gt[i] <= usina["Capac"]])
 
-    restricoes += [deficit[0] >= 0, alpha[0] >= 0]
+    restricoes.extend([deficit[0] >= 0, alpha[0] >= 0])
 
-    # Cortes da funÃ§Ã£o de custo futuro associados ao estÃ¡gio corrente.
     for corte in pote_de_corte:
+        # O corte produzido no estágio t aproxima o custo a partir de t+1.
         if corte["Estagio"] == iest:
             equacao = float(corte["Termo_Indep"])
-            equacao += sum(
-                float(corte["Coefs"][i]) * vf[i] for i in range(num_uhe)
-            )
+            for i in range(num_uhe):
+                equacao += float(corte["Coefs"][i]) * vf[i]
             restricoes.append(alpha[0] >= equacao)
 
     problema = op(fob, restricoes)
@@ -134,145 +136,139 @@ def despacho_pddd(sistema, VI, AFL, pote_de_corte, iest, imprime=False):
 
     if problema.status != "optimal":
         raise RuntimeError(
-            f"O estÃ¡gio {iest} nÃ£o encontrou soluÃ§Ã£o Ã³tima: {problema.status}"
+            f"O despacho do estágio {iest} não encontrou solução ótima: "
+            f"status={problema.status}"
         )
-
-    dual_balanco = [
-        float(restricoes[i].multiplier.value[0]) for i in range(num_uhe)
-    ]
-    dual_demanda = float(restricoes[indice_demanda].multiplier.value[0])
 
     resultado = {
         "DGer": {
-            "DÃ©ficit": _escalar(deficit[0]),
-            "CMO": dual_demanda,
+            "Déficit": _valor(deficit[0]),
+            "CMO": float(restricoes[restricao_demanda].multiplier.value[0]),
             "CustoTotal": float(fob.value()[0]),
-            "CustoFuturo": _escalar(alpha[0]),
+            "CustoFuturo": _valor(alpha[0]),
         },
-        "UHE": [
-            {
-                "vf": _escalar(vf[i]),
-                "vt": _escalar(vt[i]),
-                "vv": _escalar(vv[i]),
-                "cma": dual_balanco[i],
-            }
-            for i in range(num_uhe)
-        ],
-        "UTE": [{"gt": _escalar(gt[i])} for i in range(num_ute)],
+        "UHE": [],
+        "UTE": [],
     }
 
+    for i in range(num_uhe):
+        resultado["UHE"].append({
+            "vf": _valor(vf[i]),
+            "vt": _valor(vt[i]),
+            "vv": _valor(vv[i]),
+            "cma": float(restricoes[i].multiplier.value[0]),
+        })
+
+    for i in range(num_ute):
+        resultado["UTE"].append({"gt": _valor(gt[i])})
+
     if imprime:
-        print(f"EstÃ¡gio {iest} | custo total: {resultado['DGer']['CustoTotal']:.2f}")
+        print(f"Estágio {iest} | custo total: {resultado['DGer']['CustoTotal']:.2f}")
 
     return resultado
 
 
-def pddd(sistema, cenario=0, imprime=False, tolerancia=0.01, max_iter=100):
-    """Executa a ProgramaÃ§Ã£o DinÃ¢mica Dual DeterminÃ­stica.
+def pddd(sistema, cenario=0, imprime=False, tolerancia=0.01, max_iteracoes=100):
+    """Executa a PDDD para um cenário determinístico de afluências.
 
-    O cenÃ¡rio Ã© uma trajetÃ³ria determinÃ­stica escolhida antes da execuÃ§Ã£o:
-    0 = otimista; 1 = pessimista.
+    cenario=0 corresponde à primeira coluna de Afl e cenario=1 à segunda.
     """
+    if cenario not in range(sistema["DGer"]["Nr_Cen"]):
+        raise ValueError("Cenário inválido.")
+
+    inicio = time.time()
     num_uhe = len(sistema["UHE"])
     num_ute = len(sistema["UTE"])
-    num_est = sistema["DGer"]["Nr_Est"]
+    num_estagios = sistema["DGer"]["Nr_Est"]
 
-    if cenario < 0 or cenario >= sistema["DGer"]["Nr_Cen"]:
-        raise ValueError("CenÃ¡rio invÃ¡lido. Use 0 para otimista ou 1 para pessimista.")
+    cortes = []
+    zinf_historico = []
+    zsup_historico = []
+    memoria_final = []
 
-    pote_de_corte = []
-    zinf_hist = []
-    zsup_hist = []
-    inicio = time.time()
-    memoria = None
-
-    for iteracao in range(max_iter):
-        # ------------------------------------------------------------------
-        # FORWARD: simula a polÃ­tica ao longo dos 12 estÃ¡gios.
-        # ------------------------------------------------------------------
+    for iteracao in range(1, max_iteracoes + 1):
+        # ------------------------------- FORWARD ------------------------------
         memoria = []
-        vi = [uhe["VI"] for uhe in sistema["UHE"]]
+        vi_atual = [u["VI"] for u in sistema["UHE"]]
         zsup = 0.0
+        zinf = None
 
-        for idx_est in range(num_est):
-            iest = idx_est + 1
-            afl = [uhe["Afl"][idx_est][cenario] for uhe in sistema["UHE"]]
-            resultado = despacho_pddd(
-                sistema, vi, afl, pote_de_corte, iest, imprime
+        for estagio in range(1, num_estagios + 1):
+            afl = [u["Afl"][estagio - 1][cenario] for u in sistema["UHE"]]
+            decisao = despacho_pddd(
+                sistema, vi_atual, afl, cortes, estagio, imprime
             )
-            memoria.append(resultado)
-            zsup += (
-                resultado["DGer"]["CustoTotal"]
-                - resultado["DGer"]["CustoFuturo"]
-            )
-            vi = [resultado["UHE"][i]["vf"] for i in range(num_uhe)]
+            memoria.append(decisao)
+            zsup += decisao["DGer"]["CustoTotal"] - decisao["DGer"]["CustoFuturo"]
+            if estagio == 1:
+                zinf = decisao["DGer"]["CustoTotal"]
+            vi_atual = [u["vf"] for u in decisao["UHE"]]
 
-        # O valor do primeiro estÃ¡gio com alpha Ã© o limite inferior.
-        zinf = memoria[0]["DGer"]["CustoTotal"]
-        zinf_hist.append(zinf)
-        zsup_hist.append(zsup)
-
-        if imprime:
-            print(
-                f"IteraÃ§Ã£o {iteracao + 1}: "
-                f"ZINF={zinf:.2f} | ZSUP={zsup:.2f} | gap={abs(zsup-zinf):.6f}"
-            )
+        zinf_historico.append(float(zinf))
+        zsup_historico.append(float(zsup))
+        memoria_final = memoria
 
         if abs(zsup - zinf) <= tolerancia:
             break
 
-        # ------------------------------------------------------------------
-        # BACKWARD: do Ãºltimo estÃ¡gio atÃ© o segundo.
-        # A soluÃ§Ã£o do estÃ¡gio t produz um corte para alpha do estÃ¡gio t-1.
-        # ------------------------------------------------------------------
-        for idx_est in range(num_est - 1, 0, -1):
-            iest = idx_est + 1
+        # ------------------------------ BACKWARD -----------------------------
+        # Usa o volume inicial efetivamente visitado no forward em cada estágio
+        # e a afluência correspondente ao próprio estágio.
+        for estagio in range(num_estagios, 0, -1):
+            if estagio == 1:
+                vi_corte = [u["VI"] for u in sistema["UHE"]]
+            else:
+                vi_corte = [u["vf"] for u in memoria[estagio - 2]["UHE"]]
 
-            # Estado que entra no estÃ¡gio corrente: vf do estÃ¡gio anterior
-            # visitado na passada forward desta iteraÃ§Ã£o.
-            vi = [memoria[idx_est - 1]["UHE"][i]["vf"] for i in range(num_uhe)]
-            afl = [uhe["Afl"][idx_est][cenario] for uhe in sistema["UHE"]]
-
-            resultado_bw = despacho_pddd(
-                sistema, vi, afl, pote_de_corte, iest, imprime=False
+            afl = [u["Afl"][estagio - 1][cenario] for u in sistema["UHE"]]
+            decisao = despacho_pddd(
+                sistema, vi_corte, afl, cortes, estagio, imprime=False
             )
 
-            # MantÃ©m a convenÃ§Ã£o do cÃ³digo do PDF: coeficiente = -CMA.
-            coefs = [-resultado_bw["UHE"][i]["cma"] for i in range(num_uhe)]
-            termo_indep = resultado_bw["DGer"]["CustoTotal"]
-            termo_indep -= sum(vi[i] * coefs[i] for i in range(num_uhe))
+            coefs = [-u["cma"] for u in decisao["UHE"]]
+            termo_indep = decisao["DGer"]["CustoTotal"]
+            termo_indep -= sum(vi_corte[i] * coefs[i] for i in range(num_uhe))
 
-            pote_de_corte.append(
-                {
-                    "Estagio": iest - 1,
-                    "Termo_Indep": termo_indep,
-                    "Coefs": coefs,
-                }
-            )
+            # O corte calculado no estágio t é usado como custo futuro em t-1.
+            if estagio > 1:
+                cortes.append({
+                    "Estagio": estagio - 1,
+                    "Termo_Indep": float(termo_indep),
+                    "Coefs": [float(c) for c in coefs],
+                })
     else:
-        raise RuntimeError(
-            f"A PDDD nÃ£o convergiu em {max_iter} iteraÃ§Ãµes. "
-            "Revise os dados ou aumente max_iter."
-        )
+        iteracao = max_iteracoes
 
-    # SÃ©ries no formato consumido pelo app.py.
-    vf = [[d["UHE"][i]["vf"] for d in memoria] for i in range(num_uhe)]
-    vt = [[d["UHE"][i]["vt"] for d in memoria] for i in range(num_uhe)]
-    vv = [[d["UHE"][i]["vv"] for d in memoria] for i in range(num_uhe)]
+    vf = [[] for _ in range(num_uhe)]
+    vt = [[] for _ in range(num_uhe)]
+    vv = [[] for _ in range(num_uhe)]
+    cma = [[] for _ in range(num_uhe)]
+    gt = [[] for _ in range(num_ute)]
+    cmo = []
+    deficit = []
+    custo_total = 0.0
 
-    # O app apresenta o valor da Ã¡gua como o negativo do dual bruto,
-    # seguindo a mesma convenÃ§Ã£o usada na formaÃ§Ã£o dos cortes do PDF.
-    cma = [[-d["UHE"][i]["cma"] for d in memoria] for i in range(num_uhe)]
-    gt = [[d["UTE"][i]["gt"] for d in memoria] for i in range(num_ute)]
+    for decisao in memoria_final:
+        for i in range(num_uhe):
+            vf[i].append(decisao["UHE"][i]["vf"])
+            vt[i].append(decisao["UHE"][i]["vt"])
+            vv[i].append(decisao["UHE"][i]["vv"])
+            cma[i].append(decisao["UHE"][i]["cma"])
+        for i in range(num_ute):
+            gt[i].append(decisao["UTE"][i]["gt"])
+        cmo.append(decisao["DGer"]["CMO"])
+        deficit.append(decisao["DGer"]["Déficit"])
+        custo_total += decisao["DGer"]["CustoTotal"] - decisao["DGer"]["CustoFuturo"]
 
     return {
         "DGer": {
-            "CustoTotal": zsup_hist[-1],
-            "CMO": [-d["DGer"]["CMO"] for d in memoria],
-            "Deficit": [d["DGer"]["DÃ©ficit"] for d in memoria],
-            "ZINF": zinf_hist,
-            "ZSUP": zsup_hist,
-            "Nr_Iteracoes": len(zinf_hist),
+            "CustoTotal": float(custo_total),
+            "CMO": cmo,
+            "Deficit": deficit,
+            "ZINF": zinf_historico,
+            "ZSUP": zsup_historico,
+            "Nr_Iteracoes": len(zinf_historico),
+            "Convergiu": abs(zsup_historico[-1] - zinf_historico[-1]) <= tolerancia,
             "Tempo": time.time() - inicio,
         },
         "UHE": [
@@ -280,4 +276,4 @@ def pddd(sistema, cenario=0, imprime=False, tolerancia=0.01, max_iter=100):
             for i in range(num_uhe)
         ],
         "UTE": [{"gt": gt[i]} for i in range(num_ute)],
- 
+    }
