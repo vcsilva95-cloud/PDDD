@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import copy
-import inspect
 import streamlit as st
 import plotly.graph_objects as go
 from modelo import sistema, pddd
@@ -15,8 +14,11 @@ st.markdown("""
 .side-value{font-size:1.55rem;line-height:1.2;margin:.2rem 0 1rem}.side-card{line-height:1.7;margin-bottom:1rem}
 [data-testid="stMetric"]{background:#f8fafc;border:1px solid #d8e0ea;padding:1rem;border-radius:12px;min-height:112px}
 [data-testid="stMetricValue"]{color:#12213a!important;font-size:1.45rem!important}.stButton>button{width:100%;background:#ff4f55;color:#fff!important;border:0;font-weight:700}
-div[data-baseweb="select"]>div,div[data-baseweb="input"]>div{background:#10151d!important;border-color:#10151d!important}
-div[data-baseweb="select"] *,div[data-baseweb="input"] input{color:#fff!important}[data-testid="stTabs"] button p{color:#12213a!important;font-weight:650}
+div[data-baseweb="select"]>div,div[data-baseweb="input"]>div{background:#ffffff!important;border:1px solid #d8e0ea!important;border-radius:9px!important}
+div[data-baseweb="select"] *,div[data-baseweb="input"] input{color:#12213a!important}
+[data-testid="stNumberInput"] button{background:#f8fafc!important;color:#12213a!important;border-color:#d8e0ea!important}
+[data-testid="stSlider"] [role="slider"]{background:#1f6fd1!important}
+[data-testid="stSlider"] [data-testid="stTickBar"]{color:#12213a!important}[data-testid="stTabs"] button p{color:#12213a!important;font-weight:650}
 </style>""", unsafe_allow_html=True)
 
 def br(v, c=0):
@@ -46,34 +48,87 @@ with st.sidebar:
     st.subheader("Usinas Termelétricas")
     for u in sistema["UTE"]:
         st.markdown(f'<div class="side-card"><b>{nome(u["Nome"])}</b><br>Potência máxima: {br(u["Capac"])} MW<br>CVU: R$ {br(u["Custo"])} / MWméd</div>',unsafe_allow_html=True)
-    st.divider(); st.subheader("Parâmetros da PDDD")
-    cen_nome=st.selectbox("Trajetória hidrológica",["Cenário 1 • Otimista","Cenário 2 • Pessimista"])
-    cen=0 if cen_nome.startswith("Cenário 1") else 1
-    tol=st.number_input("Tolerância absoluta",min_value=.0001,max_value=1000000.,value=.01,step=.01,format="%.4f")
-    maxit=st.number_input("Máximo de iterações",min_value=1,max_value=1000,value=100,step=1)
-    rodar=st.button("Executar PDDD",type="primary")
+    st.divider()
+    st.subheader("Parâmetros da simulação")
+    cen_nome = st.radio(
+        "Cenário hidrológico",
+        ["Otimista", "Pessimista"],
+        horizontal=False,
+    )
+    cen = 0 if cen_nome == "Otimista" else 1
+
+    fator_carga = st.slider(
+        "Carga do sistema (%)",
+        min_value=50,
+        max_value=150,
+        value=100,
+        step=5,
+    )
+
+    st.divider()
+    st.subheader("Condição inicial")
+    volumes_iniciais = []
+    for u in sistema["UHE"]:
+        st.caption(
+            f'{nome(u["Nome"])}: informe um volume inicial entre '
+            f'{br(u["Vmin"])} e {br(u["Vmax"])} hm³.'
+        )
+        volumes_iniciais.append(
+            st.number_input(
+                f'Volume inicial - {nome(u["Nome"])} (hm³)',
+                min_value=float(u["Vmin"]),
+                max_value=float(u["Vmax"]),
+                value=float(u["VI"]),
+                step=1.0,
+            )
+        )
+
+    st.divider()
+    st.subheader("Controle de convergência")
+    tol = st.number_input(
+        "Tolerância máxima",
+        min_value=0.0001,
+        max_value=1_000_000.0,
+        value=0.01,
+        step=0.01,
+        format="%.4f",
+        help="Diferença máxima admitida entre ZSUP e ZINF.",
+    )
+    maxit = st.number_input(
+        "Número máximo de iterações",
+        min_value=1,
+        max_value=1000,
+        value=100,
+        step=1,
+    )
+    rodar = st.button("Executar PDDD", type="primary")
 
 st.markdown('<div class="hero">⚡ Programação Dinâmica Dual Determinística</div>',unsafe_allow_html=True)
 st.markdown('<div class="sub">Despacho hidrotérmico, atendimento à demanda e convergência de ZINF e ZSUP.</div>',unsafe_allow_html=True)
-st.divider(); sis=copy.deepcopy(sistema)
+st.divider()
+sis = copy.deepcopy(sistema)
+sis["DGer"]["Carga"] = [
+    carga * fator_carga / 100.0 for carga in sistema["DGer"]["Carga"]
+]
+for i, volume in enumerate(volumes_iniciais):
+    sis["UHE"][i]["VI"] = float(volume)
 if rodar or "resultado" not in st.session_state:
     try:
         with st.spinner("Executando as passadas forward e backward..."):
-            # Compatibilidade com as duas assinaturas existentes de pddd:
-            # PDF original: pddd(sistema, cenario, imprime)
-            # modelo modular: pddd(sistema, cenario, imprime, tolerancia, max_iter)
-            parametros_pddd = inspect.signature(pddd).parameters
-            kwargs_pddd = {"cenario": cen, "imprime": False}
-            if "tolerancia" in parametros_pddd:
-                kwargs_pddd["tolerancia"] = float(tol)
-            if "max_iter" in parametros_pddd:
-                kwargs_pddd["max_iter"] = int(maxit)
-            elif "max_iteracoes" in parametros_pddd:
-                kwargs_pddd["max_iteracoes"] = int(maxit)
-
-            st.session_state.resultado = pddd(sis, **kwargs_pddd)
-            st.session_state.parametros = (cen_nome, float(tol), int(maxit))
-            st.session_state.parametros_aceitos = set(parametros_pddd)
+            st.session_state.resultado = pddd(
+                sis,
+                cenario=cen,
+                imprime=False,
+                tolerancia=float(tol),
+                max_iter=int(maxit),
+            )
+            st.session_state.parametros = (
+                cen_nome,
+                fator_carga,
+                tuple(volumes_iniciais),
+                float(tol),
+                int(maxit),
+            )
     except Exception as e:
         st.error(f"Não foi possível executar o modelo: {e}"); st.stop()
 r=st.session_state.resultado; p=st.session_state.parametros; est=list(range(1,sis["DGer"]["Nr_Est"]+1))
@@ -82,7 +137,7 @@ a,b,c,d=st.columns(4)
 a.metric("Custo total",f'R$ {br(r["DGer"]["CustoTotal"],2)}'); b.metric("Iterações",r["DGer"]["Nr_Iteracoes"])
 c.metric("CMO máximo",f'R$ {br(max(r["DGer"]["CMO"]),2)} / MWméd'); d.metric("Déficit máximo",f'{br(max(r["DGer"]["Deficit"]),2)} MWméd')
 gap=abs(r["DGer"]["ZSUP"][-1]-r["DGer"]["ZINF"][-1])
-(st.success if gap<=p[1] else st.warning)(f'Gap final: R$ {br(gap,4)}.')
+(st.success if gap<=p[3] else st.warning)(f'Gap final: R$ {br(gap,4)}.')
 cores_h=["#2467c4","#42a5f5"]; cores_t=["#ff9800","#ef4444"]
 t1,t2,t3,t4=st.tabs(["Despacho","Reservatórios","Custos marginais","Convergência"])
 with t1:
@@ -107,4 +162,4 @@ with t4:
     f.add_scatter(x=it,y=r["DGer"]["ZINF"],name="ZINF",mode="lines+markers",line=dict(color="#2563eb",width=3)); f.add_scatter(x=it,y=r["DGer"]["ZSUP"],name="ZSUP",mode="lines+markers",line=dict(color="#dc2626",width=3))
     st.plotly_chart(grafico(f,"Convergência da PDDD","Custo (R$)","Iteração"),use_container_width=True,theme=None)
 with st.expander("Resultados numéricos"): st.json(r,expanded=False)
-st.caption(f"Execução exibida: {p[0]} • tolerância {p[1]} • máximo de {p[2]} iterações.")
+st.caption(f"Execução exibida: cenário {p[0]} • carga {p[1]}% • tolerância {p[3]} • máximo de {p[4]} iterações.")
